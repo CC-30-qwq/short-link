@@ -1,0 +1,229 @@
+package com.example.shortlink.service.impl;
+
+import cn.hutool.crypto.digest.DigestUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.shortlink.common.Constants;
+import com.example.shortlink.dto.ShortenRequest;
+import com.example.shortlink.dto.ShortenResponse;
+import com.example.shortlink.dto.StatisticsResponse;
+import com.example.shortlink.entity.ShortLink;
+import com.example.shortlink.exception.BusinessException;
+import com.example.shortlink.exception.ErrorCode;
+import com.example.shortlink.manager.BloomFilterManager;
+import com.example.shortlink.manager.CacheManager;
+import com.example.shortlink.mapper.AccessLogMapper;
+import com.example.shortlink.mapper.ShortLinkMapper;
+import com.example.shortlink.util.Base62Encoder;
+import com.example.shortlink.util.SnowflakeIdGenerator;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+
+/**
+ * 短链接核心业务实现
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ShortLinkServiceImpl implements com.example.shortlink.service.ShortLinkService {
+
+    private final ShortLinkMapper shortLinkMapper;
+    private final AccessLogMapper accessLogMapper;
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final CacheManager cacheManager;
+    private final BloomFilterManager bloomFilterManager;
+
+    @Value("${shortlink.domain}")
+    private String domain;
+
+    /**
+     * 短码生成结果（内部类，避免重复编解码）
+     */
+    private record ShortCodeResult(long id, String shortCode) {
+    }
+
+    @Override
+    public ShortenResponse shorten(ShortenRequest request) {
+        // 1. 规范化 URL（补齐协议前缀）
+        String originalUrl = normalizeUrl(request.getOriginalUrl());
+
+        // 2. 计算 MD5（防重）
+        String md5 = DigestUtil.md5Hex(originalUrl);
+
+        // 3. 检查 Redis 缓存：此 URL 是否已经生成过短码
+        String cachedShortCode = cacheManager.getShortCodeByMd5(md5);
+        if (cachedShortCode != null) {
+            log.info("命中MD5缓存，直接返回已有短码: url={}, shortCode={}", originalUrl, cachedShortCode);
+            return buildResponse(cachedShortCode, originalUrl, request.getExpireTime());
+        }
+
+        // 4. 查询数据库：此 URL 是否已存在
+        LambdaQueryWrapper<ShortLink> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ShortLink::getOriginalUrlMd5, md5)
+                .eq(ShortLink::getStatus, Constants.STATUS_VALID);
+        ShortLink existingLink = shortLinkMapper.selectOne(queryWrapper);
+        if (existingLink != null) {
+            // 回填缓存
+            cacheManager.cacheMd5(md5, existingLink.getShortCode());
+            cacheManager.cacheShortCode(existingLink.getShortCode(), existingLink.getOriginalUrl());
+            log.info("URL已存在，返回已有短码: url={}, shortCode={}", originalUrl, existingLink.getShortCode());
+            return buildResponse(existingLink.getShortCode(), originalUrl, request.getExpireTime());
+        }
+
+        // 5. 生成新的短码（带重试机制，防 Base62 碰撞）
+        ShortCodeResult result = generateShortCodeWithRetry();
+
+        // 6. 构建实体并入库（直接使用雪花ID作为主键，避免解码）
+        ShortLink shortLink = ShortLink.builder()
+                .id(result.id())
+                .shortCode(result.shortCode())
+                .originalUrl(originalUrl)
+                .originalUrlMd5(md5)
+                .expireTime(request.getExpireTime())
+                .status(Constants.STATUS_VALID)
+                .build();
+
+        shortLinkMapper.insert(shortLink);
+
+        // 7. 写入缓存
+        cacheManager.cacheShortCode(result.shortCode(), originalUrl);
+        cacheManager.cacheMd5(md5, result.shortCode());
+
+        // 8. 加入布隆过滤器
+        bloomFilterManager.add(result.shortCode());
+
+        log.info("短链生成成功: url={}, shortCode={}",
+                originalUrl.substring(0, Math.min(80, originalUrl.length())), result.shortCode());
+        return buildResponse(result.shortCode(), originalUrl, request.getExpireTime());
+    }
+
+    @Override
+    public String getOriginalUrl(String shortCode) {
+        // 1. 布隆过滤器快速判断（不存在则直接返回404）
+        if (!bloomFilterManager.mightContain(shortCode)) {
+            log.warn("布隆过滤器判断短码不存在: {}", shortCode);
+            throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
+        }
+
+        // 2. 查询 Redis 缓存
+        String originalUrl = cacheManager.getOriginalUrl(shortCode);
+        if (originalUrl != null) {
+            log.debug("缓存命中: shortCode={}", shortCode);
+            return originalUrl;
+        }
+
+        // 3. 缓存未命中，查数据库
+        LambdaQueryWrapper<ShortLink> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ShortLink::getShortCode, shortCode)
+                .eq(ShortLink::getStatus, Constants.STATUS_VALID);
+        ShortLink shortLink = shortLinkMapper.selectOne(queryWrapper);
+
+        if (shortLink == null) {
+            log.warn("短码不存在: {}", shortCode);
+            throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
+        }
+
+        // 4. 检查是否过期
+        if (shortLink.getExpireTime() != null && shortLink.getExpireTime().isBefore(LocalDateTime.now())) {
+            log.warn("短码已过期: shortCode={}, expireTime={}", shortCode, shortLink.getExpireTime());
+            throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
+        }
+
+        // 5. 回填缓存
+        cacheManager.cacheShortCode(shortCode, shortLink.getOriginalUrl());
+        log.debug("缓存回填: shortCode={}", shortCode);
+
+        return shortLink.getOriginalUrl();
+    }
+
+    @Override
+    public StatisticsResponse getStatistics(String shortCode) {
+        // 1. 查询短链元数据
+        LambdaQueryWrapper<ShortLink> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ShortLink::getShortCode, shortCode)
+                .eq(ShortLink::getStatus, Constants.STATUS_VALID);
+        ShortLink shortLink = shortLinkMapper.selectOne(queryWrapper);
+
+        if (shortLink == null) {
+            throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
+        }
+
+        // 2. 统计访问次数
+        LambdaQueryWrapper<com.example.shortlink.entity.AccessLog> logQuery = new LambdaQueryWrapper<>();
+        logQuery.eq(com.example.shortlink.entity.AccessLog::getShortCode, shortCode);
+        long accessCount = accessLogMapper.selectCount(logQuery);
+
+        // 3. 最近访问时间
+        logQuery.clear();
+        logQuery.eq(com.example.shortlink.entity.AccessLog::getShortCode, shortCode)
+                .orderByDesc(com.example.shortlink.entity.AccessLog::getAccessTime)
+                .last("LIMIT 1");
+        com.example.shortlink.entity.AccessLog lastLog = accessLogMapper.selectOne(logQuery);
+        LocalDateTime lastAccessTime = (lastLog != null) ? lastLog.getAccessTime() : null;
+
+        return StatisticsResponse.builder()
+                .shortCode(shortCode)
+                .shortUrl(domain + "/" + shortCode)
+                .originalUrl(shortLink.getOriginalUrl())
+                .accessCount(accessCount)
+                .lastAccessTime(lastAccessTime)
+                .createTime(shortLink.getCreateTime())
+                .expireTime(shortLink.getExpireTime())
+                .status(shortLink.getStatus())
+                .build();
+    }
+
+    /**
+     * 带重试的短码生成（同时返回数字ID和短码，避免重复编解码）
+     * <p>
+     * 碰撞概率极低 (~1/10^18)，重试仅为理论兜底
+     */
+    private ShortCodeResult generateShortCodeWithRetry() {
+        for (int i = 0; i < Constants.MAX_GENERATE_RETRY; i++) {
+            long id = snowflakeIdGenerator.nextId();
+            String shortCode = Base62Encoder.encode(id);
+
+            // 检查短码唯一性
+            LambdaQueryWrapper<ShortLink> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(ShortLink::getShortCode, shortCode);
+            if (shortLinkMapper.selectCount(queryWrapper) == 0) {
+                return new ShortCodeResult(id, shortCode);
+            }
+            log.warn("短码碰撞（极低概率），重试 {}/{}: shortCode={}", i + 1, Constants.MAX_GENERATE_RETRY, shortCode);
+        }
+        throw new BusinessException(ErrorCode.SHORT_CODE_GENERATE_FAILED);
+    }
+
+    /**
+     * 规范化URL：自动补全协议前缀
+     */
+    private String normalizeUrl(String url) {
+        if (url == null || url.isBlank()) {
+            throw new BusinessException(ErrorCode.URL_INVALID);
+        }
+        String trimmed = url.trim();
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            trimmed = "http://" + trimmed;
+        }
+        // 基础校验
+        if (trimmed.length() > 2048 || !trimmed.contains(".")) {
+            throw new BusinessException(ErrorCode.URL_INVALID);
+        }
+        return trimmed;
+    }
+
+    /**
+     * 构建响应对象
+     */
+    private ShortenResponse buildResponse(String shortCode, String originalUrl, LocalDateTime expireTime) {
+        return ShortenResponse.builder()
+                .shortCode(shortCode)
+                .shortUrl(domain + "/" + shortCode)
+                .originalUrl(originalUrl)
+                .expireTime(expireTime)
+                .build();
+    }
+}

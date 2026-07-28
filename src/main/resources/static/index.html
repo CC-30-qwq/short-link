@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>短链接生成平台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}
+.container{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.2);padding:40px;width:100%;max-width:640px}
+h1{text-align:center;color:#333;margin-bottom:8px;font-size:28px}
+.subtitle{text-align:center;color:#999;margin-bottom:32px;font-size:14px}
+.tabs{display:flex;margin-bottom:24px;border-bottom:2px solid #eee}
+.tab{flex:1;text-align:center;padding:12px;cursor:pointer;color:#999;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
+.tab.active{color:#667eea;border-bottom-color:#667eea}
+.panel{display:none}
+.panel.active{display:block}
+.input-group{display:flex;gap:12px;margin-bottom:16px}
+input{flex:1;padding:14px 18px;border:2px solid #e0e0e0;border-radius:10px;font-size:15px;outline:none;transition:border-color .2s}
+input:focus{border-color:#667eea}
+button{padding:14px 28px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:10px;font-size:15px;cursor:pointer;font-weight:500;transition:all .2s;white-space:nowrap}
+button:hover{transform:translateY(-1px);box-shadow:0 4px 15px rgba(102,126,234,0.4)}
+.result{margin-top:20px;padding:20px;background:#f8f9fa;border-radius:10px;display:none}
+.result.show{display:block}
+.result .label{font-size:12px;color:#999;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.result .link{display:flex;align-items:center;gap:10px}
+.result .short-url{font-size:20px;color:#667eea;font-weight:600;text-decoration:none}
+.copy-btn{padding:6px 14px;font-size:13px;background:#e8eaf6;color:#667eea}
+.copy-btn:hover{background:#c5cae9;box-shadow:none}
+.stat-card{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.stat-item{padding:16px;background:#f8f9fa;border-radius:10px}
+.stat-item .val{font-size:24px;font-weight:700;color:#333}
+.stat-item .lbl{font-size:13px;color:#999;margin-top:4px}
+.error{margin-top:12px;padding:12px 16px;background:#fff3f3;border:1px solid #ffcdd2;border-radius:8px;color:#d32f2f;font-size:14px;display:none}
+.error.show{display:block}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
+.toast.show{opacity:1}
+@media(max-width:500px){.container{padding:24px}.input-group{flex-direction:column}.stat-card{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="container">
+<h1>🔗 短链接平台</h1>
+<p class="subtitle">长链接 → 短链接，一步搞定</p>
+<div class="tabs">
+<div class="tab active" onclick="switchTab('shorten')">生成短链接</div>
+<div class="tab" onclick="switchTab('stats')">访问统计</div>
+</div>
+<div class="panel active" id="panel-shorten">
+<div class="input-group">
+<input type="url" id="urlInput" placeholder="输入长链接，例如 https://www.baidu.com" autocomplete="off">
+<button onclick="shorten()">生成</button>
+</div>
+<div class="error" id="shortenError"></div>
+<div class="result" id="shortenResult">
+<div class="label">短链接已生成</div>
+<div class="link">
+<a class="short-url" id="shortUrl" href="#" target="_blank"></a>
+<button class="copy-btn" onclick="copyLink()">📋 复制</button>
+</div>
+</div>
+</div>
+<div class="panel" id="panel-stats">
+<div class="input-group">
+<input type="text" id="statsInput" placeholder="输入短码，例如 P927dXqDdA" autocomplete="off">
+<button onclick="getStats()">查询</button>
+</div>
+<div class="error" id="statsError"></div>
+<div class="result" id="statsResult">
+<div class="label">统计详情</div>
+<div class="stat-card">
+<div class="stat-item"><div class="val" id="statCount">-</div><div class="lbl">总访问次数</div></div>
+<div class="stat-item"><div class="val" id="statLast">-</div><div class="lbl">最近访问时间</div></div>
+<div class="stat-item"><div class="val" id="statCreated">-</div><div class="lbl">创建时间</div></div>
+<div class="stat-item"><div class="val" id="statStatus">-</div><div class="lbl">状态</div></div>
+</div>
+<div style="margin-top:12px;word-break:break-all">
+<div class="label">原始链接</div>
+<a id="statOrigin" href="#" target="_blank" style="color:#667eea;font-size:14px"></a>
+</div>
+</div>
+</div>
+</div>
+<script>
+function showToast(msg){var t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show")},2000)}
+function switchTab(tab){document.querySelectorAll(".tab")[0].classList.toggle("active",tab==="shorten");document.querySelectorAll(".tab")[1].classList.toggle("active",tab==="stats");document.getElementById("panel-shorten").classList.toggle("active",tab==="shorten");document.getElementById("panel-stats").classList.toggle("active",tab==="stats")}
+async function shorten(){var u=document.getElementById("urlInput").value.trim();var e=document.getElementById("shortenError"),r=document.getElementById("shortenResult");e.classList.remove("show");r.classList.remove("show");if(!u){e.textContent="请输入 URL";e.classList.add("show");return}try{var res=await fetch("/api/v1/url/shorten",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({originalUrl:u})});var d=await res.json();if(d.code===200){document.getElementById("shortUrl").href=d.data.shortUrl;document.getElementById("shortUrl").textContent=d.data.shortUrl;r.classList.add("show")}else{e.textContent=d.message||"生成失败";e.classList.add("show")}}catch(ex){e.textContent="网络错误";e.classList.add("show")}}
+function copyLink(){navigator.clipboard.writeText(document.getElementById("shortUrl").textContent).then(function(){showToast("已复制到剪贴板 ✓")})}
+async function getStats(){var c=document.getElementById("statsInput").value.trim();var e=document.getElementById("statsError"),r=document.getElementById("statsResult");e.classList.remove("show");r.classList.remove("show");if(!c){e.textContent="请输入短码";e.classList.add("show");return}try{var res=await fetch("/api/v1/url/statistics?shortCode="+encodeURIComponent(c));var d=await res.json();if(d.code===200){document.getElementById("statCount").textContent=d.data.accessCount||0;document.getElementById("statLast").textContent=d.data.lastAccessTime||"暂无";document.getElementById("statCreated").textContent=d.data.createTime||"-";document.getElementById("statStatus").textContent=d.data.status===1?"✅ 有效":"❌ 失效";document.getElementById("statOrigin").href=d.data.originalUrl;document.getElementById("statOrigin").textContent=d.data.originalUrl;r.classList.add("show")}else{e.textContent=d.message||"查询失败";e.classList.add("show")}}catch(ex){e.textContent="网络错误";e.classList.add("show")}}
+document.getElementById("urlInput").addEventListener("keydown",function(e){if(e.key==="Enter")shorten()});
+document.getElementById("statsInput").addEventListener("keydown",function(e){if(e.key==="Enter")getStats()});
+</script>
+</body>
+</html>

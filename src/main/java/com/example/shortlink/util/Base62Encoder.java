@@ -37,27 +37,4 @@ public final class Base62Encoder {
         // 反转得到正确的顺序（高位在前）
         return sb.reverse().toString();
     }
-
-    /**
-     * 将Base62字符串解码为原始数字ID
-     *
-     * @param code Base62编码字符串
-     * @return 原始数字ID
-     */
-    public static long decode(String code) {
-        if (code == null || code.isEmpty()) {
-            throw new IllegalArgumentException("短码不能为空");
-        }
-
-        long result = 0;
-        for (int i = 0; i < code.length(); i++) {
-            char c = code.charAt(i);
-            int index = Constants.BASE62_CHARS.indexOf(c);
-            if (index == -1) {
-                throw new IllegalArgumentException("非法的Base62字符: " + c);
-            }
-            result = result * Constants.BASE62_RADIX + index;
-        }
-        return result;
-    }
 }

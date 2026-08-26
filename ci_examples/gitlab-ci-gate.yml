@@ -1,0 +1,28 @@
+# GitLab CI 阻断逻辑示例：默认强制门禁 + 紧急手动跳过
+# 核心：测试失败 exit 1 → pipeline 红 → 阻断 Master 合并；
+#       紧急时通过 manual job 人工确认逃生。
+
+image: python:3.12
+
+stages:
+  - test
+
+# ① 门禁 job：默认强制，测试失败(exit 1)即阻断
+unit-test:
+  stage: test
+  script:
+    - pip install pytest pytest-xdist -q
+    - bash run_tests.sh        # 脚本内捕获 pytest 退出码，非0则 exit 1
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+      allow_failure: false     # 默认强制：失败 → 红灯 → 阻断 merge
+
+# ② 紧急逃生通道：manual job，紧急时人工触发
+emergency-bypass:
+  stage: test
+  script:
+    - echo "EMERGENCY: manually confirmed, bypassing gate"
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+      when: manual             # 不自动跑，需人工在页面上点击触发
+      allow_failure: true      # 允许通过（逃生通道）

@@ -1,0 +1,12 @@
+# Prometheus 配置：抓取 Celery Exporter + 加载告警规则
+global:
+  scrape_interval: 15s      # 每 15 秒抓一次
+  evaluation_interval: 15s  # 每 15 秒评估一次告警
+
+scrape_configs:
+  - job_name: 'celery'
+    static_configs:
+      - targets: ['localhost:9100']   # Celery 队列长度 Exporter
+
+rule_files:
+  - 'alert.rules.yml'

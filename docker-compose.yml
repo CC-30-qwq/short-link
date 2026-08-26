@@ -1,0 +1,17 @@
+# Docker-Compose：本地模拟发布（应用 + Redis）
+# 版本通过环境变量 APP_VERSION 控制，发布/回滚 = 切换这个变量
+services:
+  app:
+    image: shortlink:${APP_VERSION:-v1}   # 版本 = 镜像 tag
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATA_REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

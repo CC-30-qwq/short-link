@@ -1,15 +1,20 @@
 package com.example.shortlink.manager;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.shortlink.common.Constants;
+import com.example.shortlink.entity.ShortLink;
+import com.example.shortlink.mapper.ShortLinkMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBloomFilter;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,6 +27,9 @@ public class BloomFilterManager implements InitializingBean {
 
     @Autowired(required = false)
     private RedissonClient redissonClient;
+
+    @Autowired(required = false)
+    private ShortLinkMapper shortLinkMapper;
 
     @Value("${shortlink.bloom-filter.expected-insertions:1000000}")
     private long expectedInsertions;
@@ -59,7 +67,6 @@ public class BloomFilterManager implements InitializingBean {
         if (redisAvailable) {
             return bloomFilter.contains(shortCode);
         }
-        // 内存模式：直接返回 false，让请求走缓存/数据库查询
         return memorySet.contains(shortCode);
     }
 
@@ -76,12 +83,47 @@ public class BloomFilterManager implements InitializingBean {
     }
 
     /**
-     * 获取当前过滤器中的元素数量
+     * 应用启动完成后，把数据库中已有的有效短码回填到布隆过滤器。
+     * <p>
+     * 目的：布隆过滤器是内存态、不持久化，应用重启后为空，会导致历史短链首次跳转被误判为不存在。
+     * 这里在容器就绪后分页扫描有效短码并批量加入，避免一次性加载全表占用内存。
+     * <p>
+     * 放在 ApplicationReadyEvent 而非 afterPropertiesSet：确保 DataSource/MyBatis 已完全就绪；
+     * 数据库不可用时仅记录告警，不阻塞应用启动。
      */
-    public long count() {
-        if (redisAvailable) {
-            return bloomFilter.count();
+    @EventListener(ApplicationReadyEvent.class)
+    public void preloadExistingShortCodes() {
+        if (shortLinkMapper == null) {
+            log.info("ShortLinkMapper 不可用，跳过布隆过滤器预加载");
+            return;
         }
-        return memorySet.size();
+        try {
+            long pageSize = 1000;
+            long current = 1;
+            long total = 0;
+            while (true) {
+                Page<ShortLink> page = new Page<>(current, pageSize);
+                LambdaQueryWrapper<ShortLink> wrapper = new LambdaQueryWrapper<>();
+                wrapper.select(ShortLink::getId, ShortLink::getShortCode)
+                        .eq(ShortLink::getStatus, Constants.STATUS_VALID)
+                        .orderByAsc(ShortLink::getId);
+                shortLinkMapper.selectPage(page, wrapper);
+                if (page.getRecords() == null || page.getRecords().isEmpty()) {
+                    break;
+                }
+                for (ShortLink link : page.getRecords()) {
+                    add(link.getShortCode());
+                }
+                total += page.getRecords().size();
+                if (!page.hasNext()) {
+                    break;
+                }
+                current++;
+            }
+            log.info("布隆过滤器预加载完成，回填有效短码 {} 条", total);
+        } catch (Exception e) {
+            log.warn("布隆过滤器预加载失败（不影响应用启动）: {}", e.getMessage());
+        }
     }
+
 }

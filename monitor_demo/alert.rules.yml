@@ -1,0 +1,21 @@
+# Prometheus 告警规则：Celery 队列长度 + 分级
+groups:
+  - name: celery-alerts
+    rules:
+      # P0：核心队列积压 > 1000 连续 5 分钟 → 电话告警
+      - alert: CriticalQueueBacklog
+        expr: celery_queue_length{queue="critical"} > 1000
+        for: 5m
+        labels:
+          severity: P0
+        annotations:
+          summary: "核心队列积压超过 1000，持续 5 分钟"
+
+      # P1：高优队列积压 > 5000 连续 5 分钟 → 钉钉/企微
+      - alert: HighQueueBacklog
+        expr: celery_queue_length{queue="high"} > 5000
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: "高优队列积压超过 5000"

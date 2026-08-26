@@ -46,16 +46,6 @@ public class CacheManager {
         return memoryCache.get(key);
     }
 
-    public void deleteByShortCode(String shortCode) {
-        String key = buildCodeKey(shortCode);
-        if (isRedisAvailable()) {
-            redisTemplate.delete(key);
-        } else {
-            memoryCache.remove(key);
-        }
-        log.debug("删除短码缓存: {}", shortCode);
-    }
-
     // ========== MD5 -> 短码（防重） ==========
 
     public void cacheMd5(String md5, String shortCode) {

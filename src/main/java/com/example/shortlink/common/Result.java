@@ -26,16 +26,8 @@ public class Result<T> {
 
     // ========== 成功响应 ==========
 
-    public static <T> Result<T> ok() {
-        return new Result<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), null);
-    }
-
     public static <T> Result<T> ok(T data) {
         return new Result<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), data);
-    }
-
-    public static <T> Result<T> ok(String message, T data) {
-        return new Result<>(ErrorCode.SUCCESS.getCode(), message, data);
     }
 
     // ========== 失败响应 ==========

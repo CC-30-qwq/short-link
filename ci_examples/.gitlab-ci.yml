@@ -1,0 +1,28 @@
+# .gitlab-ci.yml —— GitLab CI 流水线
+# 等价于 .github/workflows/ci.yml：提交 -> 校验 -> 失败阻断
+
+# 用官方 Maven + JDK17 镜像，免去手动装环境
+image: maven:3.9-eclipse-temurin-17
+
+stages:
+  - test
+
+# 单元测试 + JaCoCo 覆盖率门禁
+unit-test:
+  stage: test
+  script:
+    - mvn -B clean verify    # 编译 + 单测 + 覆盖率检查（<50% 则失败）
+  # 失败时归档测试报告，方便定位
+  artifacts:
+    when: on_failure
+    paths:
+      - target/surefire-reports/
+    expire_in: 7 days
+  # 缓存 Maven 依赖，加速后续构建
+  cache:
+    paths:
+      - ~/.m2/repository
+  # 触发规则：PR 或主分支 push（rules 是 only/except 的现代替代）
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"'

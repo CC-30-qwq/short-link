@@ -1,0 +1,45 @@
+// Jenkinsfile —— Jenkins Declarative Pipeline
+// 等价于 .github/workflows/ci.yml：提交 -> 校验 -> 失败阻断
+
+pipeline {
+    // 在任意可用节点执行
+    agent any
+
+    // 声明 JDK 和 Maven 版本（需在 Jenkins 全局工具里预先配置好名字）
+    tools {
+        maven 'maven-3.9'
+        jdk 'jdk-17'
+    }
+
+    // 全局选项：30 分钟超时 + 禁止并发构建
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm    // 拉取触发本次构建的代码
+            }
+        }
+
+        stage('Build & Unit Test') {
+            steps {
+                sh 'mvn -B clean verify'   // 编译 + 单测 + JaCoCo 覆盖率门禁
+            }
+        }
+    }
+
+    // 后置处理：无论成败都收尾
+    post {
+        failure {
+            // 失败时归档测试报告，便于排查
+            archiveArtifacts artifacts: 'target/surefire-reports/**', allowEmptyArchive: true
+        }
+        always {
+            junit 'target/surefire-reports/*.xml'   // 测试结果可视化（需 JUnit 插件）
+            jacoco()                                 // 覆盖率报告（需 JaCoCo 插件）
+        }
+    }
+}

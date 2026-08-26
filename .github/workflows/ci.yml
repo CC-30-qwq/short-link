@@ -1,0 +1,46 @@
+name: CI
+
+# 触发条件：push 到主分支 + 任意 pull_request
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  # 质量门禁：单元测试 + 覆盖率检查
+  # 任何一步失败 → 整个 job 红灯 → PR 无法合并
+  test:
+    name: 单元测试 + 覆盖率门禁
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # clean verify 会依次执行：编译 → 单元测试 → JaCoCo 覆盖率检查
+      # 覆盖率低于 pom.xml 里配置的 50% 时，verify 失败 → 门禁拦截
+      - name: 编译 + 单元测试 + 覆盖率门禁
+        run: mvn -B clean verify
+
+      # 失败时上传测试报告，方便排查是哪个用例挂了
+      - name: 上传测试报告（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+
+      # 始终上传覆盖率报告，供回看
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/

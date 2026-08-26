@@ -6,11 +6,12 @@ spring:
     name: short-link-platform
 
   # === MySQL 数据源 ===
+  # host/port/账号 通过环境变量覆盖（默认值保持本地直跑可用）；Docker 部署时由 compose 注入 MYSQL_HOST=mysql 等
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/short_link_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456
+    url: "jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/short_link_db?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:123456}
     hikari:
       minimum-idle: 5
       maximum-pool-size: 20

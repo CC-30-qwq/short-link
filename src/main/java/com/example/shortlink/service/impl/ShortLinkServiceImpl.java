@@ -54,10 +54,11 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
         String md5 = DigestUtil.md5Hex(originalUrl);
 
         // 3. 检查 Redis 缓存：此 URL 是否已经生成过短码
+        // 缓存里只存永久有效的短码，故命中即代表永久短码、无过期问题
         String cachedShortCode = cacheManager.getShortCodeByMd5(md5);
         if (cachedShortCode != null) {
             log.info("命中MD5缓存，直接返回已有短码: url={}, shortCode={}", originalUrl, cachedShortCode);
-            return buildResponse(cachedShortCode, originalUrl, request.getExpireTime());
+            return buildResponse(cachedShortCode, originalUrl, null);
         }
 
         // 4. 查询数据库：此 URL 是否已存在
@@ -66,11 +67,13 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
                 .eq(ShortLink::getStatus, Constants.STATUS_VALID);
         ShortLink existingLink = shortLinkMapper.selectOne(queryWrapper);
         if (existingLink != null) {
-            // 回填缓存
-            cacheManager.cacheMd5(md5, existingLink.getShortCode());
-            cacheManager.cacheShortCode(existingLink.getShortCode(), existingLink.getOriginalUrl());
+            // 只有永久短链才回填缓存，避免过期短链命中缓存后绕过过期校验
+            if (existingLink.getExpireTime() == null) {
+                cacheManager.cacheMd5(md5, existingLink.getShortCode());
+                cacheManager.cacheShortCode(existingLink.getShortCode(), existingLink.getOriginalUrl());
+            }
             log.info("URL已存在，返回已有短码: url={}, shortCode={}", originalUrl, existingLink.getShortCode());
-            return buildResponse(existingLink.getShortCode(), originalUrl, request.getExpireTime());
+            return buildResponse(existingLink.getShortCode(), originalUrl, existingLink.getExpireTime());
         }
 
         // 5. 生成新的短码（带重试机制，防 Base62 碰撞）
@@ -88,9 +91,11 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
 
         shortLinkMapper.insert(shortLink);
 
-        // 7. 写入缓存
-        cacheManager.cacheShortCode(result.shortCode(), originalUrl);
-        cacheManager.cacheMd5(md5, result.shortCode());
+        // 7. 写入缓存（只有永久短链才缓存；有过期时间的短链每次实时查库校验过期）
+        if (shortLink.getExpireTime() == null) {
+            cacheManager.cacheShortCode(result.shortCode(), originalUrl);
+            cacheManager.cacheMd5(md5, result.shortCode());
+        }
 
         // 8. 加入布隆过滤器
         bloomFilterManager.add(result.shortCode());
@@ -132,9 +137,11 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
             throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
         }
 
-        // 5. 回填缓存
-        cacheManager.cacheShortCode(shortCode, shortLink.getOriginalUrl());
-        log.debug("缓存回填: shortCode={}", shortCode);
+        // 5. 回填缓存（只有永久短链才缓存）
+        if (shortLink.getExpireTime() == null) {
+            cacheManager.cacheShortCode(shortCode, shortLink.getOriginalUrl());
+            log.debug("缓存回填: shortCode={}", shortCode);
+        }
 
         return shortLink.getOriginalUrl();
     }

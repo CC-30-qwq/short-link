@@ -127,6 +127,44 @@ class ShortLinkServiceImplTest {
         verify(bloomFilterManager).add(anyString());
     }
 
+    @Test
+    @DisplayName("生成带过期时间的短链时不写缓存（每次实时查库校验过期）")
+    void shorten_newWithExpireTime_doesNotCache() {
+        LocalDateTime expire = LocalDateTime.now().plusDays(1);
+        ShortenRequest req = request("example.com");
+        req.setExpireTime(expire);
+
+        when(snowflakeIdGenerator.nextId()).thenReturn(100L);
+        when(shortLinkMapper.selectCount(any())).thenReturn(0L);
+
+        ShortenResponse resp = service.shorten(req);
+
+        assertThat(resp.getShortCode()).isEqualTo(Base62Encoder.encode(100L));
+        assertThat(resp.getExpireTime()).isEqualTo(expire);
+        verify(shortLinkMapper).insert(any(ShortLink.class));
+        verify(cacheManager, never()).cacheShortCode(anyString(), anyString());
+        verify(cacheManager, never()).cacheMd5(anyString(), anyString());
+        verify(bloomFilterManager).add(anyString());
+    }
+
+    @Test
+    @DisplayName("URL已存在但有过期时间：不回填缓存，返回已有短链的过期时间")
+    void shorten_existingWithExpireTime_notCache() {
+        LocalDateTime expire = LocalDateTime.now().plusDays(1);
+        ShortLink existing = ShortLink.builder()
+                .id(1L).shortCode("xyz789").originalUrl("http://example.com")
+                .expireTime(expire).build();
+        when(shortLinkMapper.selectOne(any())).thenReturn(existing);
+
+        ShortenResponse resp = service.shorten(request("example.com"));
+
+        assertThat(resp.getShortCode()).isEqualTo("xyz789");
+        assertThat(resp.getExpireTime()).isEqualTo(expire);
+        verify(cacheManager, never()).cacheMd5(anyString(), anyString());
+        verify(cacheManager, never()).cacheShortCode(anyString(), anyString());
+        verify(shortLinkMapper, never()).insert(any());
+    }
+
     // ==================== getOriginalUrl：查跳转五分支 ====================
 
     @Test
@@ -173,6 +211,22 @@ class ShortLinkServiceImplTest {
         assertThatThrownBy(() -> service.getOriginalUrl("abc"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining(ErrorCode.SHORT_CODE_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    @DisplayName("库中短码已过期：不回填缓存并抛 NOT_FOUND")
+    void getOriginalUrl_expired_doesNotBackfillCache() {
+        when(bloomFilterManager.mightContain("abc")).thenReturn(true);
+        ShortLink expired = ShortLink.builder()
+                .shortCode("abc").originalUrl("http://example.com")
+                .expireTime(LocalDateTime.now().minusDays(1))
+                .build();
+        when(shortLinkMapper.selectOne(any())).thenReturn(expired);
+
+        assertThatThrownBy(() -> service.getOriginalUrl("abc"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining(ErrorCode.SHORT_CODE_NOT_FOUND.getMessage());
+        verify(cacheManager, never()).cacheShortCode(anyString(), anyString());
     }
 
     @Test

@@ -68,4 +68,13 @@ public class ShortLinkController {
         StatisticsResponse response = shortLinkService.getStatistics(shortCode);
         return Result.ok(response);
     }
+
+    @DeleteMapping("/api/v1/url/{shortCode}")
+    @Operation(summary = "失效短链接", description = "将短链标记为失效，立即停止跳转")
+    public Result<Void> invalidate(
+            @Parameter(description = "短链码", required = true)
+            @PathVariable String shortCode) {
+        shortLinkService.invalidate(shortCode);
+        return Result.ok();
+    }
 }

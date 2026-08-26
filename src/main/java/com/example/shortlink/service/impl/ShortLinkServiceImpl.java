@@ -21,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.time.LocalDateTime;
 
 /**
@@ -132,9 +133,10 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
             throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
         }
 
-        // 4. 检查是否过期
+        // 4. 检查是否过期（过期则懒更新状态为失效）
         if (shortLink.getExpireTime() != null && shortLink.getExpireTime().isBefore(LocalDateTime.now())) {
-            log.warn("短码已过期: shortCode={}, expireTime={}", shortCode, shortLink.getExpireTime());
+            log.warn("短码已过期，置为失效: shortCode={}, expireTime={}", shortCode, shortLink.getExpireTime());
+            markExpired(shortLink.getId());
             throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
         }
 
@@ -176,6 +178,44 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
                 .build();
     }
 
+    @Override
+    public void invalidate(String shortCode) {
+        // 1. 查库确认存在且有效
+        LambdaQueryWrapper<ShortLink> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ShortLink::getShortCode, shortCode)
+                .eq(ShortLink::getStatus, Constants.STATUS_VALID);
+        ShortLink link = shortLinkMapper.selectOne(queryWrapper);
+        if (link == null) {
+            throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
+        }
+
+        // 2. 置失效（软删除）
+        ShortLink update = new ShortLink();
+        update.setId(link.getId());
+        update.setStatus(Constants.STATUS_INVALID);
+        shortLinkMapper.updateById(update);
+
+        // 3. 清缓存（布隆过滤器不支持删除，但查库时 status=失效 会自然拦截）
+        cacheManager.evictShortCode(shortCode);
+        cacheManager.evictMd5(link.getOriginalUrlMd5());
+
+        log.info("短链已失效: shortCode={}", shortCode);
+    }
+
+    /**
+     * 懒更新：把已过期短链的状态置为失效（失败不影响主流程）
+     */
+    private void markExpired(Long id) {
+        try {
+            ShortLink update = new ShortLink();
+            update.setId(id);
+            update.setStatus(Constants.STATUS_INVALID);
+            shortLinkMapper.updateById(update);
+        } catch (Exception e) {
+            log.warn("更新过期短链状态失败: id={}", id, e);
+        }
+    }
+
     /**
      * 带重试的短码生成（同时返回数字ID和短码，避免重复编解码）
      * <p>
@@ -208,8 +248,22 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
             trimmed = "http://" + trimmed;
         }
-        // 基础校验
-        if (trimmed.length() > 2048 || !trimmed.contains(".")) {
+        // 长度校验
+        if (trimmed.length() > 2048) {
+            throw new BusinessException(ErrorCode.URL_INVALID);
+        }
+        // 使用 java.net.URI 严格校验：必须是合法的 http/https URL 且带有效 host
+        URI uri;
+        try {
+            uri = URI.create(trimmed);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.URL_INVALID);
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new BusinessException(ErrorCode.URL_INVALID);
+        }
+        if (uri.getHost() == null || uri.getHost().isBlank()) {
             throw new BusinessException(ErrorCode.URL_INVALID);
         }
         return trimmed;

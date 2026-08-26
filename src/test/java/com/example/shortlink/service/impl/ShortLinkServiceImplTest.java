@@ -76,9 +76,17 @@ class ShortLinkServiceImplTest {
     }
 
     @Test
-    @DisplayName("URL不含点号时抛 URL_INVALID")
-    void shorten_throwWhenNoDot() {
-        assertThatThrownBy(() -> service.shorten(request("not-a-url")))
+    @DisplayName("URL含非法字符（空格）时抛 URL_INVALID")
+    void shorten_throwWhenInvalidUrl() {
+        assertThatThrownBy(() -> service.shorten(request("http://exa mple.com")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining(ErrorCode.URL_INVALID.getMessage());
+    }
+
+    @Test
+    @DisplayName("URL缺少host时抛 URL_INVALID")
+    void shorten_throwWhenNoHost() {
+        assertThatThrownBy(() -> service.shorten(request("http:///path-only")))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining(ErrorCode.URL_INVALID.getMessage());
     }
@@ -200,10 +208,11 @@ class ShortLinkServiceImplTest {
     }
 
     @Test
-    @DisplayName("短码已过期时抛 SHORT_CODE_NOT_FOUND")
+    @DisplayName("短码已过期时抛 SHORT_CODE_NOT_FOUND 并懒更新状态")
     void getOriginalUrl_throwWhenExpired() {
         when(bloomFilterManager.mightContain("abc")).thenReturn(true);
         ShortLink expired = ShortLink.builder()
+                .id(1L)
                 .shortCode("abc")
                 .expireTime(LocalDateTime.now().minusDays(1))
                 .build();
@@ -212,6 +221,7 @@ class ShortLinkServiceImplTest {
         assertThatThrownBy(() -> service.getOriginalUrl("abc"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining(ErrorCode.SHORT_CODE_NOT_FOUND.getMessage());
+        verify(shortLinkMapper).updateById(any(ShortLink.class));
     }
 
     @Test
@@ -273,5 +283,31 @@ class ShortLinkServiceImplTest {
 
         assertThat(resp.getAccessCount()).isEqualTo(0L);
         assertThat(resp.getLastAccessTime()).isNull();
+    }
+
+    // ==================== invalidate：失效短链 ====================
+
+    @Test
+    @DisplayName("失效短链：置失效并清理短码与MD5缓存")
+    void invalidate_ok() {
+        ShortLink link = ShortLink.builder()
+                .id(1L).shortCode("abc").originalUrlMd5("md5hash").build();
+        when(shortLinkMapper.selectOne(any())).thenReturn(link);
+
+        service.invalidate("abc");
+
+        verify(shortLinkMapper).updateById(any(ShortLink.class));
+        verify(cacheManager).evictShortCode("abc");
+        verify(cacheManager).evictMd5("md5hash");
+    }
+
+    @Test
+    @DisplayName("失效不存在的短链抛 NOT_FOUND")
+    void invalidate_throwWhenNotFound() {
+        when(shortLinkMapper.selectOne(any())).thenReturn(null);
+
+        assertThatThrownBy(() -> service.invalidate("nope"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining(ErrorCode.SHORT_CODE_NOT_FOUND.getMessage());
     }
 }

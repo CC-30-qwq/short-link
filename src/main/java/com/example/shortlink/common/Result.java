@@ -30,6 +30,10 @@ public class Result<T> {
         return new Result<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), data);
     }
 
+    public static <T> Result<T> ok() {
+        return new Result<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), null);
+    }
+
     // ========== 失败响应 ==========
 
     public static <T> Result<T> fail(ErrorCode errorCode) {

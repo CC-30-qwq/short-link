@@ -31,4 +31,18 @@ class CacheManagerTest {
         assertThat(m.getShortCodeByMd5("md5abc")).isEqualTo("xyz");
         assertThat(m.getShortCodeByMd5("other")).isNull();
     }
+
+    @Test
+    @DisplayName("缓存失效：evict 后读不到")
+    void memoryMode_evict() {
+        CacheManager m = new CacheManager();
+
+        m.cacheShortCode("abc", "http://example.com");
+        m.cacheMd5("md5abc", "xyz");
+        m.evictShortCode("abc");
+        m.evictMd5("md5abc");
+
+        assertThat(m.getOriginalUrl("abc")).isNull();
+        assertThat(m.getShortCodeByMd5("md5abc")).isNull();
+    }
 }

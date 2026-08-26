@@ -34,6 +34,8 @@ public final class Constants {
     public static final int MAX_GENERATE_RETRY = 3;
     /** 有效状态 */
     public static final int STATUS_VALID = 1;
+    /** 失效状态 */
+    public static final int STATUS_INVALID = 0;
 
     private Constants() {
     }

@@ -32,4 +32,11 @@ public interface ShortLinkService {
      * @return 统计信息
      */
     StatisticsResponse getStatistics(String shortCode);
+
+    /**
+     * 使短链失效（软删除，状态置为失效并清理缓存）
+     *
+     * @param shortCode 短链码
+     */
+    void invalidate(String shortCode);
 }

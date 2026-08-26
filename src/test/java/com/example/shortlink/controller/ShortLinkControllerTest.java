@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -136,5 +137,15 @@ class ShortLinkControllerTest {
         mockMvc.perform(get("/api/v1/url/statistics").param("shortCode", "abc"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accessCount").value(10));
+    }
+
+    @Test
+    @DisplayName("失效短链：正常返回 200")
+    void invalidate_ok() throws Exception {
+        mockMvc.perform(delete("/api/v1/url/abc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(shortLinkService).invalidate("abc");
     }
 }

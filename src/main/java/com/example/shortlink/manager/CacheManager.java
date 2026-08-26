@@ -66,6 +66,26 @@ public class CacheManager {
         return memoryCache.get(key);
     }
 
+    // ========== 缓存失效 ==========
+
+    public void evictShortCode(String shortCode) {
+        String key = buildCodeKey(shortCode);
+        if (isRedisAvailable()) {
+            redisTemplate.delete(key);
+        } else {
+            memoryCache.remove(key);
+        }
+    }
+
+    public void evictMd5(String md5) {
+        String key = buildMd5Key(md5);
+        if (isRedisAvailable()) {
+            redisTemplate.delete(key);
+        } else {
+            memoryCache.remove(key);
+        }
+    }
+
     // ========== Key 构建 ==========
 
     private String buildCodeKey(String shortCode) {

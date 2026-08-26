@@ -85,6 +85,9 @@ shortlink:
     max-pool-size: 8
     queue-capacity: 200
 
+  access-log:
+    retention-days: 30
+
 logging:
   level:
     com.example.shortlink: DEBUG

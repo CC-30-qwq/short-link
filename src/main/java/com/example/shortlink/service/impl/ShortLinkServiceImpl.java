@@ -3,6 +3,7 @@ package com.example.shortlink.service.impl;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.shortlink.common.Constants;
+import com.example.shortlink.dto.AccessStats;
 import com.example.shortlink.dto.ShortenRequest;
 import com.example.shortlink.dto.ShortenResponse;
 import com.example.shortlink.dto.StatisticsResponse;
@@ -158,18 +159,10 @@ public class ShortLinkServiceImpl implements com.example.shortlink.service.Short
             throw new BusinessException(ErrorCode.SHORT_CODE_NOT_FOUND);
         }
 
-        // 2. 统计访问次数
-        LambdaQueryWrapper<com.example.shortlink.entity.AccessLog> logQuery = new LambdaQueryWrapper<>();
-        logQuery.eq(com.example.shortlink.entity.AccessLog::getShortCode, shortCode);
-        long accessCount = accessLogMapper.selectCount(logQuery);
-
-        // 3. 最近访问时间
-        logQuery.clear();
-        logQuery.eq(com.example.shortlink.entity.AccessLog::getShortCode, shortCode)
-                .orderByDesc(com.example.shortlink.entity.AccessLog::getAccessTime)
-                .last("LIMIT 1");
-        com.example.shortlink.entity.AccessLog lastLog = accessLogMapper.selectOne(logQuery);
-        LocalDateTime lastAccessTime = (lastLog != null) ? lastLog.getAccessTime() : null;
+        // 2. 一次性聚合统计访问次数与最近访问时间（一条 SQL，避免两次往返）
+        AccessStats stats = accessLogMapper.selectAccessStats(shortCode);
+        long accessCount = (stats != null && stats.getAccessCount() != null) ? stats.getAccessCount() : 0L;
+        LocalDateTime lastAccessTime = (stats != null) ? stats.getLastAccessTime() : null;
 
         return StatisticsResponse.builder()
                 .shortCode(shortCode)

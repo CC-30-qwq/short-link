@@ -1,6 +1,7 @@
 package com.example.shortlink.service.impl;
 
 import com.example.shortlink.common.Constants;
+import com.example.shortlink.dto.AccessStats;
 import com.example.shortlink.dto.ShortenRequest;
 import com.example.shortlink.dto.ShortenResponse;
 import com.example.shortlink.entity.ShortLink;
@@ -250,13 +251,27 @@ class ShortLinkServiceImplTest {
                 .id(1L).shortCode("abc").originalUrl("http://example.com")
                 .createTime(LocalDateTime.now()).status(Constants.STATUS_VALID).build();
         when(shortLinkMapper.selectOne(any())).thenReturn(link);
-        when(accessLogMapper.selectCount(any())).thenReturn(5L);
-        when(accessLogMapper.selectOne(any())).thenReturn(null);
+        when(accessLogMapper.selectAccessStats(anyString())).thenReturn(new AccessStats(5L, null));
 
         var resp = service.getStatistics("abc");
 
         assertThat(resp.getShortCode()).isEqualTo("abc");
         assertThat(resp.getAccessCount()).isEqualTo(5L);
         assertThat(resp.getShortUrl()).isEqualTo("http://localhost:8080/abc");
+    }
+
+    @Test
+    @DisplayName("统计接口：无访问记录时返回 0 次")
+    void getStatistics_zeroWhenNoAccess() {
+        ShortLink link = ShortLink.builder()
+                .id(1L).shortCode("abc").originalUrl("http://example.com")
+                .createTime(LocalDateTime.now()).status(Constants.STATUS_VALID).build();
+        when(shortLinkMapper.selectOne(any())).thenReturn(link);
+        when(accessLogMapper.selectAccessStats(anyString())).thenReturn(new AccessStats(0L, null));
+
+        var resp = service.getStatistics("abc");
+
+        assertThat(resp.getAccessCount()).isEqualTo(0L);
+        assertThat(resp.getLastAccessTime()).isNull();
     }
 }

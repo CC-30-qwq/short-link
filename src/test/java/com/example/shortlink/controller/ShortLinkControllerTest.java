@@ -6,6 +6,8 @@ import com.example.shortlink.dto.StatisticsResponse;
 import com.example.shortlink.exception.BusinessException;
 import com.example.shortlink.exception.ErrorCode;
 import com.example.shortlink.manager.RateLimiterManager;
+import com.example.shortlink.mapper.AccessLogMapper;
+import com.example.shortlink.mapper.ShortLinkMapper;
 import com.example.shortlink.service.AccessLogService;
 import com.example.shortlink.service.ShortLinkService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,6 +45,10 @@ class ShortLinkControllerTest {
     private AccessLogService accessLogService;
     @MockBean
     private RateLimiterManager rateLimiterManager;
+    @MockBean
+    private ShortLinkMapper shortLinkMapper;
+    @MockBean
+    private AccessLogMapper accessLogMapper;
 
     @Test
     @DisplayName("生成短链：正常返回 200 和短链信息")

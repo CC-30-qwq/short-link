@@ -43,7 +43,17 @@ src/main/java/com/example/
 └── material/                  # 演示：素材秒传（并发去重）
 ```
 
-仓库其余目录（`celery_demo/`、`pytest_demo/`、`scripts/`、`monitor_demo/`、`ci_examples/`、`devops-training/`、`real_world_task/`）为独立的 Python 训练/演示代码，与 Java 主体无运行时关联。
+仓库其余目录为独立的 Python / DevOps 训练与演示代码，与 Java 主体**无运行时关联**，可各自单独运行：
+
+| 目录 | 内容 |
+|---|---|
+| `pytest_demo/` | pytest 单元测试示例：计费边界、用户存储、短链工具，含 `conftest.py` fixture 与 Dockerfile |
+| `real_world_task/` | 贴近真实场景的测试练习：计费服务与文件上传服务的测试用例 |
+| `celery_demo/` | Celery 异步任务：队列机制、队列管理、8 种常见操作演示、部署脚本 |
+| `monitor_demo/` | 监控与告警：Prometheus 指标暴露、告警规则、Celery 队列监控、告警模拟与 webhook 接收 |
+| `ci_examples/` | CI 配置示例：`Jenkinsfile`、GitLab CI 质量门禁 |
+| `devops-training/` | DevOps 练习：健康检查脚本 |
+| `scripts/` | 运维脚本合集：缓存演示、日志压缩与轮转、配置 API、HTTP 客户端、Mock 服务、端口探测、进程守护、发布脚本 |
 
 ## 快速开始
 
